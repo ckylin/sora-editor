@@ -1,0 +1,119 @@
+完美！现在让我总结一下 CodeEditor 中设置文本颜色的逻辑：
+
+  CodeEditor 文本颜色设置逻辑分析
+
+  在 sora-editor 中，文本颜色的设置和应用遵循以下架构：
+
+  1. 颜色方案管理 (ColorScheme)
+
+  核心类: EditorColorScheme
+  - 位置: CodeEditor.java:338
+  private EditorColorScheme colorScheme;
+  - 初始化: CodeEditor.java:608-609
+  colorScheme = EditorColorScheme.getDefault();
+  colorScheme.attachEditor(this);
+  - 获取方法: CodeEditor.java:4158-4160
+  public EditorColorScheme getColorScheme() {
+      return colorScheme;
+  }
+  - 设置方法: CodeEditor.java:4171-4179
+  public void setColorScheme(@NonNull EditorColorScheme colors) {
+      if (colorScheme != null) {
+          colorScheme.detachEditor(this);
+      }
+      colorScheme = colors;
+      colors.attachEditor(this);
+      invalidate();
+  }
+
+  2. 文本样式系统 (Spans)
+
+  Span 的获取: CodeEditor.java:1665-1679
+  public List<Span> getSpansForLine(int line) {
+      var spanMap = textStyles == null ? null : textStyles.spans;
+      if (defaultSpans.isEmpty()) {
+          defaultSpans.add(SpanFactory.obtainNoExt(0, EditorColorScheme.TEXT_NORMAL));
+      }
+      // 返回该行的所有 span（包含颜色信息）
+  }
+
+  3. 渲染流程
+
+  3.1 入口点
+
+  - CodeEditor.java:4706-4709
+  protected void onDraw(@NonNull Canvas canvas) {
+      super.onDraw(canvas);
+      renderer.draw(canvas);
+  }
+
+  3.2 渲染器绘制
+
+  - EditorRenderer.java:187-197
+  public void draw(@NonNull Canvas canvas) {
+      drawView(canvas);
+  }
+
+  3.3 绘制视图
+
+  - EditorRenderer.java:458-638 - drawView() 方法
+    - 第 461-462 行：获取颜色方案并绘制背景
+    EditorColorScheme color = editor.getColorScheme();
+  drawColor(canvas, color.getColor(EditorColorScheme.WHOLE_BACKGROUND), viewRect);
+
+  3.4 绘制文本行
+
+  - EditorRenderer.java:1143-1442 - drawRows() 方法核心流程：
+
+  步骤 1 - 绘制背景 (1172-1317 行)
+  - 当前行背景色
+  - 自定义行背景
+  - 选中文本背景
+  - 匹配文本背景
+
+  步骤 2 - 绘制文本 (1326-1442 行)
+  // 1364: 获取 Spans Reader（包含颜色信息）
+  reader = spans == null ? EmptyReader.getInstance() : spans.read();
+
+  // 1407-1420: 创建 TextRow 并绘制
+  TextRow tr = new TextRow();
+  tr.set(lineBuf, rowInf.startColumn, rowInf.endColumn,
+         reader.getSpansOnLine(line), // 传入 spans
+         rowInf.inlayHints, getLineDirections(line),
+         paintGeneral, lineCache, createTextRowParams());
+  tr.draw(canvas, beginOffset, endOffset);
+
+  4. 颜色应用点
+
+  EditorRenderer 中的关键颜色设置点：
+
+  1. 文本默认颜色 (842 行):
+  paintGeneral.setColor(editor.getColorScheme().getColor(EditorColorScheme.TEXT_NORMAL));
+  2. Span 指定颜色 (2318-2322 行):
+  long style = span.getStyle();
+  paintGeneral.setTextSkewX(TextStyle.isItalics(style) ? RenderingConstants.TEXT_SKEW_X : 0f);
+  GraphicsCompat.drawTextRun(canvas, text, ...);
+  3. 行号颜色 (523-573 行):
+  int lineNumberColor = editor.getColorScheme().getColor(EditorColorScheme.LINE_NUMBER);
+  int currentLineBgColor = editor.getColorScheme().getColor(EditorColorScheme.CURRENT_LINE);
+
+  5. 颜色常量定义
+
+  在 EditorColorScheme 中定义了各种颜色常量：
+  - TEXT_NORMAL - 普通文本
+  - SELECTION_INSERT - 插入选择
+  - SELECTED_TEXT_BACKGROUND - 选中文本背景
+  - MATCHED_TEXT_BACKGROUND - 匹配文本背景
+  - LINE_NUMBER - 行号
+  - CURRENT_LINE - 当前行
+  - 等等...
+
+  总结
+
+  文本颜色设置的完整流程：
+  1. 通过 setColorScheme() 设置全局颜色方案
+  2. Language 的 AnalyzeManager 分析代码，生成 Styles 对象（包含 Spans）
+  3. Spans 中的每个 Span 包含样式信息（颜色 ID、粗体、斜体等）
+  4. 渲染时，EditorRenderer.drawRows() 读取 Spans
+  5. TextRow 根据 Span 的样式信息和 ColorScheme 绘制文本
+  6. 使用 paintGeneral.setColor() 设置画笔颜色并绘制文本
